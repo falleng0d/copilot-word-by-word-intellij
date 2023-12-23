@@ -1,5 +1,6 @@
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.changelog.markdownToHTML
+import org.jetbrains.kotlin.js.dce.InputResource.Companion.file
 
 fun properties(key: String) = providers.gradleProperty(key)
 fun environment(key: String) = providers.environmentVariable(key)
@@ -123,5 +124,79 @@ tasks {
         // Specify pre-release label to publish the plugin in a custom Release Channel automatically. Read more:
         // https://plugins.jetbrains.com/docs/intellij/deployment.html#specifying-a-release-channel
         channels = properties("pluginVersion").map { listOf(it.split('-').getOrElse(1) { "default" }.split('.').first()) }
+    }
+}
+
+abstract class InstallPlugin : DefaultTask() {
+    @get:Internal
+    var pluginName: String? = null
+
+    @get:Internal
+    var projectVersion: Any = ""
+}
+
+tasks.register<InstallPlugin>("installPlugin") {
+    // disable cache
+    outputs.upToDateWhen { false }
+
+    val pluginNameLocal = properties("pluginName").get()
+    val projectVersionLocal = project.version
+
+    pluginName = pluginNameLocal
+    projectVersion = projectVersionLocal
+
+    doLast {
+        val envFile = "../.env"
+
+        // Load environment file if it exists
+        val envFileObj = file(envFile)
+        var envMap = mutableMapOf<String, String>()
+        if (envFileObj.exists()) {
+            envFileObj.readLines().forEach {
+                if (it.isNotEmpty() && !it.startsWith("#")) {
+                    val pos = it.indexOf("=")
+                    val key = it.substring(0, pos)
+                    val value = it.substring(pos + 1)
+                    // check if the key is already set
+                    if (environment(key).getOrNull() == null) {
+                        envMap[key] = value
+                    }
+                }
+            }
+        }
+
+        val installLocationsCopy = envMap["INSTALL_LOCATIONS"] ?: environment("INSTALL_LOCATIONS").getOrNull()
+        if (installLocationsCopy == null) {
+            println("[WARNING] No install locations specified")
+            return@doLast
+        }
+
+        val locationsList: List<String> = installLocationsCopy.split(",")
+
+        // eg. build/distributions/Plugin-2000.10.1.100.zip
+        val pluginZip: File = file("build/distributions/${pluginName}-$projectVersion.zip")
+
+        locationsList.forEach { location ->
+            // extract installation name (eg  C:\\Users\\...\\JetBrains\\Rider2023.2\\plugins
+            // -> Rider2023.2)
+            val separator = if (location.contains("/")) "/" else "\\"
+            val installationName = location.split(separator).dropLast(1).last()
+
+            // delete plugin folder
+            val existingInstallation = file("$location/$pluginName")
+            if (existingInstallation.exists()) {
+                if (!existingInstallation.deleteRecursively()) {
+                    println("[ERROR] Skipping $installationName. Failed to delete existing installation")
+                    return@forEach
+                }
+            }
+
+            copy {
+                from(zipTree(pluginZip))
+                into(location)
+            }
+
+            println("Plugin installed to $installationName")
+        }
     }
 }

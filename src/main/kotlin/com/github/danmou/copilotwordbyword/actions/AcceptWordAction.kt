@@ -33,6 +33,23 @@ internal class AcceptWordAction : AnAction() {
         ActionManager.getInstance().getAction("copilot.requestCompletions").actionPerformed(e)
     }
 
+    override fun update(e: AnActionEvent) {
+        val copilotEditorManager = CopilotEditorManagerImpl()
+        if(editor == null) {
+            e.presentation.isEnabled = false
+            return
+        }
+
+        val editor = editor!!
+
+        if (!CopilotEditorUtil.isSelectedEditor(editor) ||
+                !copilotEditorManager.hasCompletionInlays(editor)) {
+            e.presentation.isEnabled = false
+            return
+        }
+
+        e.presentation.isEnabled = true
+    }
 
     private fun getFirstWordOfSuggestion(): String? {
         val inlayContent = getInlayContent() ?: return null
